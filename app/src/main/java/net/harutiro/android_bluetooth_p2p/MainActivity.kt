@@ -3,11 +3,14 @@ package net.harutiro.android_bluetooth_p2p
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
-import net.harutiro.android_bluetooth_p2p.MainActivity.Companion.BLUETOOTH_REQUEST_CODE
 import pub.devrel.easypermissions.EasyPermissions
 
 
@@ -22,10 +25,13 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
 
     // EasyPermissionについての記事
     // https://qiita.com/kaleidot725/items/fa31476d7b7076265b3d
+    @SuppressLint("InlinedApi")
     val permissions = arrayOf(
         Manifest.permission.BLUETOOTH,
         Manifest.permission.BLUETOOTH_ADMIN,
-        Manifest.permission.ACCESS_COARSE_LOCATION
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.BLUETOOTH_SCAN,
+        Manifest.permission.BLUETOOTH_CONNECT
     )
 
     override fun onPermissionsGranted(requestCode: Int, list: List<String>) {
@@ -41,16 +47,13 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
     }
 
 
+    @RequiresApi(Build.VERSION_CODES.M)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        @SuppressLint("MissingPermission")
-        if(!EasyPermissions.hasPermissions(this, *permissions)){
-            val reqEnableBTIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            startActivityForResult(reqEnableBTIntent, BLUETOOTH_REQUEST_CODE)
-        }
-
+        val bluetoothManager: BluetoothManager = getSystemService(BluetoothManager::class.java)
+        val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
         // パーミッションが許可されていない時の処理
         if (!EasyPermissions.hasPermissions(this, *permissions)) {
@@ -61,6 +64,34 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
         }else{
             Log.d(TAG,"パーミッションが許可されました。")
         }
+
+
+        findViewById<Button>(R.id.search_button).setOnClickListener{
+
+            @SuppressLint("MissingPermission")
+            if(EasyPermissions.hasPermissions(this, *permissions)){
+                if(bluetoothAdapter?.startDiscovery() == true) {
+                    // 発見開始（結果はブロードキャストで取得）
+                } else {
+                    // 発見開始できず。Bluetooth が無効であるなど。
+                }
+            }
+
+        }
+
+        findViewById<Button>(R.id.bluetooth_on_button).setOnClickListener {
+
+            @SuppressLint("MissingPermission")
+            if(EasyPermissions.hasPermissions(this, *permissions)){
+                if (bluetoothAdapter?.isEnabled == false) {
+                    val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                    startActivityForResult(enableBtIntent, BLUETOOTH_REQUEST_CODE)
+                }
+            }
+
+        }
+
+
 
     }
 
