@@ -1,7 +1,6 @@
 package net.harutiro.android_bluetooth_p2p
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,13 +11,16 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import org.w3c.dom.Text
 import pub.devrel.easypermissions.EasyPermissions
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.*
 
 
@@ -36,23 +38,34 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
     var bluetoothManager: BluetoothManager? = null
     var bluetoothAdapter: BluetoothAdapter? = null
 
+    private var isScanning: Boolean = false // スキャン中かどうかのフラグ
+
     // EasyPermissionについての記事
     // https://qiita.com/kaleidot725/items/fa31476d7b7076265b3d
-    val permissions = if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
-        arrayOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_ADVERTISE
+//    val permissions = if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
+//        arrayOf(
+//            Manifest.permission.ACCESS_COARSE_LOCATION,
+//            Manifest.permission.ACCESS_FINE_LOCATION,
+//            Manifest.permission.BLUETOOTH_CONNECT,
+//            Manifest.permission.BLUETOOTH_SCAN,
+//            Manifest.permission.BLUETOOTH_ADVERTISE
+//
+//        )
+//    }else{
+//        arrayOf(
+//            Manifest.permission.ACCESS_COARSE_LOCATION,
+//            Manifest.permission.ACCESS_FINE_LOCATION,
+//        )
+//    }
 
-        )
-    }else{
-        arrayOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        )
-    }
+    val permissions = arrayOf(
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.BLUETOOTH_CONNECT,
+        Manifest.permission.BLUETOOTH_SCAN,
+        Manifest.permission.BLUETOOTH_ADVERTISE
+
+    )
 
     // Create a BroadcastReceiver for ACTION_FOUND.
     private val receiver = object : BroadcastReceiver() {
@@ -72,6 +85,27 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
 
                 }
             }
+
+            if (intent.action.equals(BluetoothAdapter.ACTION_DISCOVERY_STARTED)){
+                Toast.makeText(
+                    context,
+                    "Bluetooth検出開始",
+                    Toast.LENGTH_SHORT
+                ).show()
+                Log.d("$TAG discoStart", "Discovery Started")
+                isScanning = true
+            }
+
+            if(intent.action.equals(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)){
+                isScanning = false
+
+                Toast.makeText(
+                    context,
+                    "Bluetooth検出終了",
+                    Toast.LENGTH_SHORT
+                ).show()
+                Log.d("$TAG discoFin", "Discovery finished")
+            }
         }
     }
 
@@ -83,7 +117,7 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
 
     override fun onPermissionsDenied(requestCode: Int, list: List<String>) {
         // ユーザーの許可が得られなかったときに呼び出される。
-        Log.d(TAG,"パーミッションが許可されてません。")
+//        Log.d(TAG,"パーミッションが許可されてません。")
 
     }
 
@@ -98,16 +132,21 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
         bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager?.adapter
 
+        val sendAndReceiveThread = SendAndReceiveThread(this)
+
+
+
 
         // パーミッションが許可されていない時の処理
         if (!EasyPermissions.hasPermissions(this, *permissions)) {
-            Log.d(TAG,"パーミッションが許可されてません。")
+            Log.d(TAG,"パーミッションが許可されてません。許可部分")
             //許可をもらう部分。
             EasyPermissions.requestPermissions(this, "パーミッションに関する説明", REQUEST_CODE, *permissions)
 
         }else{
             Log.d(TAG,"パーミッションが許可されました。")
         }
+
 
 
         //すでにペアリングされているデバイスを取得する。
@@ -155,8 +194,18 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
             // Register for broadcasts when a device is discovered.
             Log.d(TAG,"新しいデバイスを検索をする")
 
-            val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
-            registerReceiver(receiver, filter)
+            registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
+            registerReceiver(receiver, IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED))
+            registerReceiver(receiver, IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED))
+
+            bluetoothAdapter!!.startDiscovery()
+
+
+            Toast.makeText(
+                this,
+                "Update Button Clicked!!",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         //検出可能にする。
@@ -172,17 +221,21 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
 
             findViewById<TextView>(R.id.conect_type_textview).text = "サーバー"
 
-            val acceptThread = AcceptThread( bluetoothAdapter?.listenUsingInsecureRfcommWithServiceRecord("myapp", UUID.fromString(uuid)))
+            val acceptThread = AcceptThread( bluetoothAdapter?.listenUsingInsecureRfcommWithServiceRecord("myapp", UUID.fromString(uuid)),sendAndReceiveThread)
             acceptThread.start()
         }
 
         findViewById<Button>(R.id.bluetooth_client_button).setOnClickListener {
             findViewById<TextView>(R.id.conect_type_textview).text = "クライアント"
 
-            val connectThread =  ConnectThread(this, connectDevice?.createRfcommSocketToServiceRecord(UUID.fromString(uuid)))
+            val connectThread =  ConnectThread(this, connectDevice?.createRfcommSocketToServiceRecord(UUID.fromString(uuid)),sendAndReceiveThread)
             connectThread.start()
 
+        }
 
+        findViewById<Button>(R.id.send_data_button).setOnClickListener {
+            val text = findViewById<EditText>(R.id.send_data_edit_text_view).text.toString()
+            sendAndReceiveThread.write(text.toByteArray())
         }
 
 
@@ -200,8 +253,6 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
         }
     }
 
-
-
     override fun onDestroy() {
         super.onDestroy()
 
@@ -210,7 +261,8 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
     }
 
     private inner class AcceptThread(
-        val mmServerSocket: BluetoothServerSocket?
+        val mmServerSocket: BluetoothServerSocket?,
+        val sendAndReceiveThread: SendAndReceiveThread
     ) : Thread() {
 
 
@@ -233,6 +285,8 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
                         findViewById<TextView>(R.id.conect_type_textview).text = "サーバー　接続済み"
                     }
 
+                    sendAndReceiveThread.mmSocket = it
+
                     mmServerSocket?.close()
                     shouldLoop = false
                 }
@@ -249,7 +303,11 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
         }
     }
 
-    private inner class ConnectThread( val context: Context,val mmSocket: BluetoothSocket?) : Thread() {
+    private inner class ConnectThread(
+        val context: Context,
+        val mmSocket: BluetoothSocket? = null,
+        val sendAndReceiveThread: SendAndReceiveThread
+    ) : Thread() {
 
         override fun run() {
             // Cancel discovery because it otherwise slows down the connection.
@@ -272,6 +330,8 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
                     findViewById<TextView>(R.id.conect_type_textview).text = "クライアント　接続済み"
                 }
 
+                sendAndReceiveThread.mmSocket = socket
+
 
 
             }
@@ -283,6 +343,92 @@ class MainActivity : AppCompatActivity() , EasyPermissions.PermissionCallbacks {
                 mmSocket?.close()
             } catch (e: IOException) {
                 Log.e(TAG, "Could not close the client socket", e)
+            }
+        }
+    }
+
+    private inner class SendAndReceiveThread(val context: Context) : Thread() {
+
+        var mmSocket: BluetoothSocket? = null
+
+        val MESSAGE_READ: Int = 0
+        val MESSAGE_WRITE: Int = 1
+        val MESSAGE_TOAST: Int = 2
+
+        private val mmBuffer: ByteArray = ByteArray(1024) // mmBuffer store for the stream
+
+        override fun run() {
+
+            var numBytes: Int // bytes returned from read()
+
+            // Keep listening to the InputStream until an exception occurs.
+            while (true) {
+                // Read from the InputStream.
+
+                if(mmSocket?.inputStream != null){
+                    numBytes = try {
+                        mmSocket?.inputStream!!.read(mmBuffer)
+                    } catch (e: IOException) {
+                        Log.d(TAG, "Input stream was disconnected", e)
+                        break
+                    }
+
+                    // Send the obtained bytes to the UI activity.
+//                    val readMsg = handler.obtainMessage(
+//                        MESSAGE_READ, numBytes, -1,
+//                        mmBuffer)
+//                    readMsg.sendToTarget()
+
+                    //TODO:ここの部分で書き換えを行っているのを止める
+                    this@MainActivity.runOnUiThread{
+                        Log.d("$TAG:受信部分",numBytes.toString())
+//                        findViewById<TextView>(R.id.conect_type_textview).text = "クライアント　接続済み"
+                    }
+
+
+                }
+            }
+        }
+
+        // Call this from the main activity to send data to the remote device.
+        fun write(bytes: ByteArray) {
+
+
+            if(mmSocket?.outputStream != null){
+                try {
+                    mmSocket?.outputStream?.write(bytes)
+                } catch (e: IOException) {
+                    Log.e(TAG, "Error occurred when sending data", e)
+
+//                    // Send a failure message back to the activity.
+//                    val writeErrorMsg = handler.obtainMessage(MESSAGE_TOAST)
+//                    val bundle = Bundle().apply {
+//                        putString("toast", "Couldn't send data to the other device")
+//                    }
+//                    writeErrorMsg.data = bundle
+//                    handler.sendMessage(writeErrorMsg)
+                    return
+                }
+
+                // Share the sent message with the UI activity.
+//                val writtenMsg = handler.obtainMessage(
+//                    MESSAGE_WRITE, -1, -1, mmBuffer)
+//                writtenMsg.sendToTarget()
+
+                Toast.makeText(context,"送信しました",Toast.LENGTH_LONG).show()
+                Log.d("$TAG:送信部分","送信したよ")
+
+            }
+        }
+
+        // Call this method from the main activity to shut down the connection.
+        fun cancel() {
+            if(mmSocket != null){
+                try {
+                    mmSocket!!.close()
+                } catch (e: IOException) {
+                    Log.e(TAG, "Could not close the connect socket", e)
+                }
             }
         }
     }
